@@ -4,7 +4,7 @@ use anyhow::Context;
 use byteorder::{ByteOrder, NativeEndian};
 use netlink_packet_utils::{
     nla::{DefaultNla, Nla, NlaBuffer, NlasIterator},
-    parsers::{parse_string, parse_u32, parse_u64, parse_u8},
+    parsers::{parse_string, parse_u16, parse_u32, parse_u64, parse_u8},
     DecodeError, Emitable, Parseable,
 };
 
@@ -38,7 +38,8 @@ const ETH_ALEN: usize = 6;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Nl80211Attr {
-    WiPhy(u32),
+    Wiphy(u32),
+    WiphyName(String),
     IfIndex(u32),
     IfName(String),
     IfType(Nl80211InterfaceType),
@@ -46,17 +47,43 @@ pub enum Nl80211Attr {
     Wdev(u64),
     Generation(u32),
     Use4Addr(bool),
-    WiPhyFreq(u32),
-    WiPhyFreqOffset(u32),
-    WiPhyChannelType(Nl80211WiPhyChannelType),
+    WiphyFreq(u32),
+    WiphyFreqOffset(u32),
+    WiphyChannelType(Nl80211WiphyChannelType),
     ChannelWidth(Nl80211ChannelWidth),
     CenterFreq1(u32),
     CenterFreq2(u32),
-    WiPhyTxPowerLevel(u32),
+    WiphyTxPowerLevel(u32),
     Ssid(String),
     StationInfo(Vec<Nl80211StationInfo>),
     TransmitQueueStats(Vec<Nl80211TransmitQueueStat>),
     MloLinks(Vec<Nl80211MloLink>),
+    WiphyRetryShort(u8),
+    WiphyRetryLong(u8),
+    WiphyFragThreshold(u32),
+    WiphyRtsThreshold(u32),
+    WiphyCoverageClass(u8),
+    MaxNumScanSsids(u8),
+    MaxNumSchedScanSsids(u8),
+    MaxScanIeLen(u16),
+    MaxSchedScanIeLen(u16),
+    MaxMatchSets(u8),
+    SupportIbssRsn(bool),
+    SupportMeshAuth(bool),
+    SupportApUapsd(bool),
+    RoamSupport(bool),
+    TdlsSupport(bool),
+    TdlsExternalSetup(bool),
+    CipherSuites(Vec<Nl80211CipherSuit>),
+    MaxNumPmkids(u8),
+    ControlPortEthertype(bool),
+    WiphyAntennaAvailTx(u32),
+    WiphyAntennaAvailRx(u32),
+    ApProbeRespOffload(u32),
+    WiphyAntennaTx(u32),
+    WiphyAntennaRx(u32),
+    SupportedIftypes(Vec<Nl80211IfMode>),
+    WiphyBands(Vec<Nl80211Band>),
     Other(DefaultNla),
 }
 
@@ -64,30 +91,58 @@ impl Nla for Nl80211Attr {
     fn value_len(&self) -> usize {
         match self {
             Self::IfIndex(_)
-            | Self::WiPhy(_)
+            | Self::Wiphy(_)
             | Self::IfType(_)
             | Self::Generation(_)
-            | Self::WiPhyFreq(_)
-            | Self::WiPhyFreqOffset(_)
-            | Self::WiPhyChannelType(_)
+            | Self::WiphyFreq(_)
+            | Self::WiphyFreqOffset(_)
+            | Self::WiphyChannelType(_)
             | Self::CenterFreq1(_)
             | Self::CenterFreq2(_)
-            | Self::WiPhyTxPowerLevel(_)
-            | Self::ChannelWidth(_) => 4,
+            | Self::WiphyTxPowerLevel(_)
+            | Self::ChannelWidth(_)
+            | Self::WiphyFragThreshold(_)
+            | Self::WiphyRtsThreshold(_)
+            | Self::WiphyAntennaAvailTx(_)
+            | Self::WiphyAntennaAvailRx(_)
+            | Self::ApProbeRespOffload(_)
+            | Self::WiphyAntennaTx(_)
+            | Self::WiphyAntennaRx(_) => 4,
             Self::Wdev(_) => 8,
-            Self::IfName(ref s) | Self::Ssid(ref s) => s.len() + 1,
+            Self::IfName(ref s)
+            | Self::Ssid(ref s)
+            | Self::WiphyName(ref s) => s.len() + 1,
             Self::Mac(_) => ETH_ALEN,
             Self::Use4Addr(_) => 1,
+            Self::WiphyRetryShort(_)
+            | Self::WiphyRetryLong(_)
+            | Self::WiphyCoverageClass(_)
+            | Self::MaxNumScanSsids(_)
+            | Self::MaxNumSchedScanSsids(_)
+            | Self::MaxMatchSets(_)
+            | Self::MaxNumPmkids(_) => 1,
             Self::TransmitQueueStats(ref nlas) => nlas.as_slice().buffer_len(),
             Self::StationInfo(ref nlas) => nlas.as_slice().buffer_len(),
             Self::MloLinks(ref links) => links.as_slice().buffer_len(),
+            Self::MaxScanIeLen(_) | Self::MaxSchedScanIeLen(_) => 2,
+            Self::SupportIbssRsn(_)
+            | Self::SupportMeshAuth(_)
+            | Self::SupportApUapsd(_)
+            | Self::RoamSupport(_)
+            | Self::TdlsSupport(_)
+            | Self::TdlsExternalSetup(_)
+            | Self::ControlPortEthertype(_) => 0,
+            Self::CipherSuites(ref s) => 4 * s.len(),
+            Self::SupportedIftypes(ref s) => s.as_slice().buffer_len(),
+            Self::WiphyBands(ref s) => s.as_slice().buffer_len(),
             Self::Other(attr) => attr.value_len(),
         }
     }
 
     fn kind(&self) -> u16 {
         match self {
-            Self::WiPhy(_) => NL80211_ATTR_WIPHY,
+            Self::Wiphy(_) => NL80211_ATTR_WIPHY,
+            Self::WiphyName(_) => NL80211_ATTR_WIPHY_NAME,
             Self::IfIndex(_) => NL80211_ATTR_IFINDEX,
             Self::IfName(_) => NL80211_ATTR_IFNAME,
             Self::IfType(_) => NL80211_ATTR_IFTYPE,
@@ -95,17 +150,47 @@ impl Nla for Nl80211Attr {
             Self::Wdev(_) => NL80211_ATTR_WDEV,
             Self::Generation(_) => NL80211_ATTR_GENERATION,
             Self::Use4Addr(_) => NL80211_ATTR_4ADDR,
-            Self::WiPhyFreq(_) => NL80211_ATTR_WIPHY_FREQ,
-            Self::WiPhyFreqOffset(_) => NL80211_ATTR_WIPHY_FREQ_OFFSET,
-            Self::WiPhyChannelType(_) => NL80211_ATTR_WIPHY_CHANNEL_TYPE,
+            Self::WiphyFreq(_) => NL80211_ATTR_WIPHY_FREQ,
+            Self::WiphyFreqOffset(_) => NL80211_ATTR_WIPHY_FREQ_OFFSET,
+            Self::WiphyChannelType(_) => NL80211_ATTR_WIPHY_CHANNEL_TYPE,
             Self::ChannelWidth(_) => NL80211_ATTR_CHANNEL_WIDTH,
             Self::CenterFreq1(_) => NL80211_ATTR_CENTER_FREQ1,
             Self::CenterFreq2(_) => NL80211_ATTR_CENTER_FREQ2,
-            Self::WiPhyTxPowerLevel(_) => NL80211_ATTR_WIPHY_TX_POWER_LEVEL,
+            Self::WiphyTxPowerLevel(_) => NL80211_ATTR_WIPHY_TX_POWER_LEVEL,
             Self::Ssid(_) => NL80211_ATTR_SSID,
             Self::StationInfo(_) => NL80211_ATTR_STA_INFO,
             Self::TransmitQueueStats(_) => NL80211_ATTR_TXQ_STATS,
             Self::MloLinks(_) => NL80211_ATTR_MLO_LINKS,
+            Self::WiphyRetryShort(_) => NL80211_ATTR_WIPHY_RETRY_SHORT,
+            Self::WiphyRetryLong(_) => NL80211_ATTR_WIPHY_RETRY_LONG,
+            Self::WiphyFragThreshold(_) => NL80211_ATTR_WIPHY_FRAG_THRESHOLD,
+            Self::WiphyRtsThreshold(_) => NL80211_ATTR_WIPHY_RTS_THRESHOLD,
+            Self::WiphyCoverageClass(_) => NL80211_ATTR_WIPHY_COVERAGE_CLASS,
+            Self::MaxNumScanSsids(_) => NL80211_ATTR_MAX_NUM_SCAN_SSIDS,
+            Self::MaxNumSchedScanSsids(_) => {
+                NL80211_ATTR_MAX_NUM_SCHED_SCAN_SSIDS
+            }
+            Self::MaxScanIeLen(_) => NL80211_ATTR_MAX_SCAN_IE_LEN,
+            Self::MaxSchedScanIeLen(_) => NL80211_ATTR_MAX_SCHED_SCAN_IE_LEN,
+            Self::MaxMatchSets(_) => NL80211_ATTR_MAX_MATCH_SETS,
+            Self::SupportIbssRsn(_) => NL80211_ATTR_SUPPORT_IBSS_RSN,
+            Self::SupportMeshAuth(_) => NL80211_ATTR_SUPPORT_MESH_AUTH,
+            Self::SupportApUapsd(_) => NL80211_ATTR_SUPPORT_AP_UAPSD,
+            Self::RoamSupport(_) => NL80211_ATTR_ROAM_SUPPORT,
+            Self::TdlsSupport(_) => NL80211_ATTR_TDLS_SUPPORT,
+            Self::TdlsExternalSetup(_) => NL80211_ATTR_TDLS_EXTERNAL_SETUP,
+            Self::CipherSuites(_) => NL80211_ATTR_CIPHER_SUITES,
+            Self::MaxNumPmkids(_) => NL80211_ATTR_MAX_NUM_PMKIDS,
+            Self::ControlPortEthertype(_) => {
+                NL80211_ATTR_CONTROL_PORT_ETHERTYPE
+            }
+            Self::WiphyAntennaAvailTx(_) => NL80211_ATTR_WIPHY_ANTENNA_AVAIL_TX,
+            Self::WiphyAntennaAvailRx(_) => NL80211_ATTR_WIPHY_ANTENNA_AVAIL_RX,
+            Self::ApProbeRespOffload(_) => NL80211_ATTR_PROBE_RESP_OFFLOAD,
+            Self::WiphyAntennaTx(_) => NL80211_ATTR_WIPHY_ANTENNA_TX,
+            Self::WiphyAntennaRx(_) => NL80211_ATTR_WIPHY_ANTENNA_RX,
+            Self::SupportedIftypes(_) => NL80211_ATTR_SUPPORTED_IFTYPES,
+            Self::WiphyBands(_) => NL80211_ATTR_WIPHY_BANDS,
             Self::Other(attr) => attr.kind(),
         }
     }
@@ -113,22 +198,41 @@ impl Nla for Nl80211Attr {
     fn emit_value(&self, buffer: &mut [u8]) {
         match self {
             Self::IfIndex(d)
-            | Self::WiPhy(d)
+            | Self::Wiphy(d)
             | Self::Generation(d)
-            | Self::WiPhyFreq(d)
-            | Self::WiPhyFreqOffset(d)
+            | Self::WiphyFreq(d)
+            | Self::WiphyFreqOffset(d)
             | Self::CenterFreq1(d)
             | Self::CenterFreq2(d)
-            | Self::WiPhyTxPowerLevel(d) => NativeEndian::write_u32(buffer, *d),
+            | Self::WiphyTxPowerLevel(d)
+            | Self::WiphyFragThreshold(d)
+            | Self::WiphyRtsThreshold(d)
+            | Self::WiphyAntennaAvailTx(d)
+            | Self::WiphyAntennaAvailRx(d)
+            | Self::ApProbeRespOffload(d)
+            | Self::WiphyAntennaTx(d)
+            | Self::WiphyAntennaRx(d) => NativeEndian::write_u32(buffer, *d),
+            Self::MaxScanIeLen(d) | Self::MaxSchedScanIeLen(d) => {
+                NativeEndian::write_u16(buffer, *d)
+            }
             Self::Wdev(d) => NativeEndian::write_u64(buffer, *d),
             Self::IfType(d) => NativeEndian::write_u32(buffer, (*d).into()),
             Self::Mac(ref s) => buffer.copy_from_slice(s),
-            Self::IfName(ref s) | Self::Ssid(ref s) => {
+            Self::IfName(ref s)
+            | Self::Ssid(ref s)
+            | Self::WiphyName(ref s) => {
                 buffer[..s.len()].copy_from_slice(s.as_bytes());
                 buffer[s.len()] = 0;
             }
-            Self::Use4Addr(d) => buffer[0] = *d as u8,
-            Self::WiPhyChannelType(d) => {
+            Self::Use4Addr(_)
+            | Self::SupportIbssRsn(_)
+            | Self::SupportMeshAuth(_)
+            | Self::SupportApUapsd(_)
+            | Self::RoamSupport(_)
+            | Self::TdlsSupport(_)
+            | Self::TdlsExternalSetup(_)
+            | Self::ControlPortEthertype(_) => (),
+            Self::WiphyChannelType(d) => {
                 NativeEndian::write_u32(buffer, (*d).into())
             }
             Self::ChannelWidth(d) => {
@@ -137,6 +241,24 @@ impl Nla for Nl80211Attr {
             Self::StationInfo(ref nlas) => nlas.as_slice().emit(buffer),
             Self::TransmitQueueStats(ref nlas) => nlas.as_slice().emit(buffer),
             Self::MloLinks(ref links) => links.as_slice().emit(buffer),
+            Self::WiphyRetryShort(d)
+            | Self::WiphyRetryLong(d)
+            | Self::WiphyCoverageClass(d)
+            | Self::MaxNumScanSsids(d)
+            | Self::MaxNumSchedScanSsids(d)
+            | Self::MaxMatchSets(d)
+            | Self::MaxNumPmkids(d) => buffer[0] = *d,
+            Self::CipherSuites(ref suits) => {
+                let nums: Vec<u32> =
+                    suits.as_slice().iter().map(|s| u32::from(*s)).collect();
+                for (i, v) in nums.as_slice().iter().enumerate() {
+                    buffer[i * 4..(i + 1) * 4]
+                        .copy_from_slice(&v.to_ne_bytes());
+                }
+            }
+            Self::SupportedIftypes(ref s) => s.as_slice().emit(buffer),
+            Self::WiphyBands(ref s) => s.as_slice().emit(buffer),
+
             Self::Other(ref attr) => attr.emit(buffer),
         }
     }
@@ -154,7 +276,14 @@ impl<'a, T: AsRef<[u8]> + ?Sized> Parseable<NlaBuffer<&'a T>> for Nl80211Attr {
             NL80211_ATTR_WIPHY => {
                 let err_msg =
                     format!("Invalid NL80211_ATTR_WIPHY value {:?}", payload);
-                Self::WiPhy(parse_u32(payload).context(err_msg)?)
+                Self::Wiphy(parse_u32(payload).context(err_msg)?)
+            }
+            NL80211_ATTR_WIPHY_NAME => {
+                let err_msg = format!(
+                    "Invalid NL80211_ATTR_WIPHY_NAME value {:?}",
+                    payload
+                );
+                Self::WiphyName(parse_string(payload).context(err_msg)?)
             }
             NL80211_ATTR_IFNAME => {
                 let err_msg =
@@ -199,21 +328,21 @@ impl<'a, T: AsRef<[u8]> + ?Sized> Parseable<NlaBuffer<&'a T>> for Nl80211Attr {
                     "Invalid NL80211_ATTR_WIPHY_FREQ value {:?}",
                     payload
                 );
-                Self::WiPhyFreq(parse_u32(payload).context(err_msg)?)
+                Self::WiphyFreq(parse_u32(payload).context(err_msg)?)
             }
             NL80211_ATTR_WIPHY_FREQ_OFFSET => {
                 let err_msg = format!(
                     "Invalid NL80211_ATTR_WIPHY_FREQ_OFFSET value {:?}",
                     payload
                 );
-                Self::WiPhyFreqOffset(parse_u32(payload).context(err_msg)?)
+                Self::WiphyFreqOffset(parse_u32(payload).context(err_msg)?)
             }
             NL80211_ATTR_WIPHY_CHANNEL_TYPE => {
                 let err_msg = format!(
                     "Invalid NL80211_ATTR_WIPHY_CHANNEL_TYPE value {:?}",
                     payload
                 );
-                Self::WiPhyChannelType(
+                Self::WiphyChannelType(
                     parse_u32(payload).context(err_msg)?.into(),
                 )
             }
@@ -243,7 +372,7 @@ impl<'a, T: AsRef<[u8]> + ?Sized> Parseable<NlaBuffer<&'a T>> for Nl80211Attr {
                     "Invalid NL80211_ATTR_WIPHY_TX_POWER_LEVEL value {:?}",
                     payload
                 );
-                Self::WiPhyTxPowerLevel(parse_u32(payload).context(err_msg)?)
+                Self::WiphyTxPowerLevel(parse_u32(payload).context(err_msg)?)
             }
             NL80211_ATTR_SSID => {
                 let err_msg =
@@ -293,6 +422,172 @@ impl<'a, T: AsRef<[u8]> + ?Sized> Parseable<NlaBuffer<&'a T>> for Nl80211Attr {
                     );
                 }
                 Self::MloLinks(links)
+            }
+            NL80211_ATTR_WIPHY_RETRY_SHORT => {
+                let err_msg = format!(
+                    "Invalid NL80211_ATTR_WIPHY_RETRY_SHORT value {:?}",
+                    payload
+                );
+                Self::WiphyRetryShort(parse_u8(payload).context(err_msg)?)
+            }
+            NL80211_ATTR_WIPHY_RETRY_LONG => {
+                let err_msg = format!(
+                    "Invalid NL80211_ATTR_WIPHY_RETRY_LONG value {:?}",
+                    payload
+                );
+                Self::WiphyRetryLong(parse_u8(payload).context(err_msg)?)
+            }
+            NL80211_ATTR_WIPHY_FRAG_THRESHOLD => {
+                let err_msg = format!(
+                    "Invalid NL80211_ATTR_WIPHY_FRAG_THRESHOLD value {:?}",
+                    payload
+                );
+                Self::WiphyFragThreshold(parse_u32(payload).context(err_msg)?)
+            }
+            NL80211_ATTR_WIPHY_RTS_THRESHOLD => {
+                let err_msg = format!(
+                    "Invalid NL80211_ATTR_WIPHY_RTS_THRESHOLD value {:?}",
+                    payload
+                );
+                Self::WiphyRtsThreshold(parse_u32(payload).context(err_msg)?)
+            }
+            NL80211_ATTR_WIPHY_COVERAGE_CLASS => {
+                let err_msg = format!(
+                    "Invalid NL80211_ATTR_WIPHY_COVERAGE_CLASS value {:?}",
+                    payload
+                );
+                Self::WiphyCoverageClass(parse_u8(payload).context(err_msg)?)
+            }
+            NL80211_ATTR_MAX_NUM_SCAN_SSIDS => {
+                let err_msg = format!(
+                    "Invalid NL80211_ATTR_MAX_NUM_SCAN_SSIDS value {:?}",
+                    payload
+                );
+                Self::MaxNumScanSsids(
+                    parse_u8(payload).context(err_msg)?.into(),
+                )
+            }
+            NL80211_ATTR_MAX_NUM_SCHED_SCAN_SSIDS => {
+                let err_msg = format!(
+                    "Invalid NL80211_ATTR_MAX_NUM_SCHED_SCAN_SSIDS value {:?}",
+                    payload
+                );
+                Self::MaxNumSchedScanSsids(parse_u8(payload).context(err_msg)?)
+            }
+            NL80211_ATTR_MAX_SCAN_IE_LEN => {
+                let err_msg = format!(
+                    "Invalid NL80211_ATTR_MAX_SCAN_IE_LEN value {:?}",
+                    payload
+                );
+                Self::MaxScanIeLen(parse_u16(payload).context(err_msg)?)
+            }
+            NL80211_ATTR_MAX_SCHED_SCAN_IE_LEN => {
+                let err_msg = format!(
+                    "Invalid NL80211_ATTR_MAX_SCHED_SCAN_IE_LEN value {:?}",
+                    payload
+                );
+                Self::MaxSchedScanIeLen(parse_u16(payload).context(err_msg)?)
+            }
+            NL80211_ATTR_MAX_MATCH_SETS => {
+                let err_msg = format!(
+                    "Invalid NL80211_ATTR_MAX_MATCH_SETS value {:?}",
+                    payload
+                );
+                Self::MaxMatchSets(parse_u8(payload).context(err_msg)?)
+            }
+            NL80211_ATTR_SUPPORT_IBSS_RSN => Self::SupportIbssRsn(true),
+            NL80211_ATTR_SUPPORT_MESH_AUTH => Self::SupportMeshAuth(true),
+            NL80211_ATTR_SUPPORT_AP_UAPSD => Self::SupportApUapsd(true),
+            NL80211_ATTR_ROAM_SUPPORT => Self::RoamSupport(true),
+            NL80211_ATTR_TDLS_SUPPORT => Self::TdlsSupport(true),
+            NL80211_ATTR_TDLS_EXTERNAL_SETUP => Self::TdlsExternalSetup(true),
+            NL80211_ATTR_CIPHER_SUITES => {
+                let err_msg = format!(
+                    "Invalid NL80211_ATTR_CIPHER_SUITES value {:?}",
+                    payload
+                );
+                let mut suits = Vec::new();
+                for i in 0..(payload.len() / 4) {
+                    suits.push(
+                        parse_u32(&payload[i * 4..(i + 1) * 4])
+                            .context(err_msg.clone())?
+                            .into(),
+                    );
+                }
+                Self::CipherSuites(suits)
+            }
+            NL80211_ATTR_MAX_NUM_PMKIDS => {
+                let err_msg = format!(
+                    "Invalid NL80211_ATTR_MAX_NUM_PMKIDS value {:?}",
+                    payload
+                );
+                Self::MaxNumPmkids(parse_u8(payload).context(err_msg)?)
+            }
+            NL80211_ATTR_CONTROL_PORT_ETHERTYPE => {
+                Self::ControlPortEthertype(true)
+            }
+            NL80211_ATTR_WIPHY_ANTENNA_AVAIL_TX => {
+                let err_msg = format!(
+                    "Invalid NL80211_ATTR_WIPHY_ANTENNA_AVAIL_TX value {:?}",
+                    payload
+                );
+                Self::WiphyAntennaAvailTx(parse_u32(payload).context(err_msg)?)
+            }
+            NL80211_ATTR_WIPHY_ANTENNA_AVAIL_RX => {
+                let err_msg = format!(
+                    "Invalid NL80211_ATTR_WIPHY_ANTENNA_AVAIL_RX value {:?}",
+                    payload
+                );
+                Self::WiphyAntennaAvailRx(parse_u32(payload).context(err_msg)?)
+            }
+            NL80211_ATTR_PROBE_RESP_OFFLOAD => {
+                let err_msg = format!(
+                    "Invalid NL80211_ATTR_PROBE_RESP_OFFLOAD value {:?}",
+                    payload
+                );
+                Self::ApProbeRespOffload(parse_u32(payload).context(err_msg)?)
+            }
+            NL80211_ATTR_WIPHY_ANTENNA_TX => {
+                let err_msg = format!(
+                    "Invalid NL80211_ATTR_WIPHY_ANTENNA_TX value {:?}",
+                    payload
+                );
+                Self::WiphyAntennaTx(parse_u32(payload).context(err_msg)?)
+            }
+            NL80211_ATTR_WIPHY_ANTENNA_RX => {
+                let err_msg = format!(
+                    "Invalid NL80211_ATTR_WIPHY_ANTENNA_RX value {:?}",
+                    payload
+                );
+                Self::WiphyAntennaRx(parse_u32(payload).context(err_msg)?)
+            }
+            NL80211_ATTR_SUPPORTED_IFTYPES => {
+                let err_msg = format!(
+                    "Invalid NL80211_ATTR_SUPPORTED_IFTYPES value {:?}",
+                    payload
+                );
+                let mut nlas = Vec::new();
+                for nla in NlasIterator::new(payload) {
+                    let nla = &nla.context(err_msg.clone())?;
+                    nlas.push(
+                        Nl80211IfMode::parse(nla).context(err_msg.clone())?,
+                    );
+                }
+                Self::SupportedIftypes(nlas)
+            }
+            NL80211_ATTR_WIPHY_BANDS => {
+                let err_msg = format!(
+                    "Invalid NL80211_ATTR_WIPHY_BANDS value {:?}",
+                    payload
+                );
+                let mut nlas = Vec::new();
+                for nla in NlasIterator::new(payload) {
+                    let nla = &nla.context(err_msg.clone())?;
+                    nlas.push(
+                        Nl80211Band::parse(nla).context(err_msg.clone())?,
+                    );
+                }
+                Self::WiphyBands(nlas)
             }
             _ => Self::Other(
                 DefaultNla::parse(buf).context("invalid NLA (unknown kind)")?,

@@ -8,6 +8,8 @@ use netlink_packet_utils::{
 
 use crate::attr::Nl80211Attr;
 
+const NL80211_CMD_GET_WIPHY: u8 = 1;
+const NL80211_CMD_NEW_WIPHY: u8 = 3;
 const NL80211_CMD_GET_INTERFACE: u8 = 5;
 const NL80211_CMD_NEW_INTERFACE: u8 = 7;
 const NL80211_CMD_GET_STATION: u8 = 17;
@@ -19,6 +21,8 @@ pub enum Nl80211Cmd {
     InterfaceNew,
     StationGet,
     StationNew,
+    WiPhyGet,
+    WiPhyNew,
 }
 
 impl From<Nl80211Cmd> for u8 {
@@ -28,6 +32,8 @@ impl From<Nl80211Cmd> for u8 {
             Nl80211Cmd::InterfaceNew => NL80211_CMD_NEW_INTERFACE,
             Nl80211Cmd::StationGet => NL80211_CMD_GET_STATION,
             Nl80211Cmd::StationNew => NL80211_CMD_NEW_STATION,
+            Nl80211Cmd::WiPhyGet => NL80211_CMD_GET_WIPHY,
+            Nl80211Cmd::WiPhyNew => NL80211_CMD_NEW_WIPHY,
         }
     }
 }
@@ -64,6 +70,13 @@ impl Nl80211Message {
         Nl80211Message {
             cmd: Nl80211Cmd::StationGet,
             nlas,
+        }
+    }
+
+    pub fn new_wiphy_get() -> Self {
+        Nl80211Message {
+            cmd: Nl80211Cmd::WiPhyGet,
+            nlas: vec![],
         }
     }
 }
@@ -105,6 +118,10 @@ impl ParseableParametrized<[u8], GenlHeader> for Nl80211Message {
             },
             NL80211_CMD_NEW_STATION => Self {
                 cmd: Nl80211Cmd::StationNew,
+                nlas: parse_nlas(buffer)?,
+            },
+            NL80211_CMD_NEW_WIPHY => Self {
+                cmd: Nl80211Cmd::WiPhyNew,
                 nlas: parse_nlas(buffer)?,
             },
             cmd => {

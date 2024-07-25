@@ -10,6 +10,7 @@ mod macros;
 mod message;
 mod station;
 mod stats;
+mod wiphy;
 
 pub use attr::Nl80211Attr;
 pub use channel::{Nl80211ChannelWidth, Nl80211WiPhyChannelType};
@@ -27,6 +28,11 @@ pub use station::{
 };
 pub use stats::{
     NestedNl80211TidStats, Nl80211TidStats, Nl80211TransmitQueueStat,
+    Nl80211TransmitQueueStat,
+};
+pub use wiphy::{
+    Nl80211Band, Nl80211CipherSuit, Nl80211IfMode, Nl80211WiPhyGetRequest,
+    Nl80211WiPhyHandle,
 };
 
 pub(crate) use handle::nl80211_execute;
